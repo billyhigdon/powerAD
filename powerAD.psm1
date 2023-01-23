@@ -20,8 +20,38 @@ function Get-RecursiveGroupMembers {
             Continue
         }
 
-        
+        foreach ($member in $groupObject.Member) {
+            $memberDomain = Split-DomainFromDistinguishedName -DistinguishedName $member
 
+            $adObject = Get-ADObject -Identity $member -Server $memberDomain
+
+            if ($adObject.ObjectClass -eq "group") {
+                $results += New-Object -TypeName psobject -Property @{
+                    User = (Get-ADGroup -Identity $adObject.DistinguishedName -Server $memberDomain)
+                    DirectGroup = $group
+                }
+                $nestedGroups = Get-RecursiveGroupMembers -Identity $adObject.DistinguishedName
+                $results += $nestedGroups
+            } elseif ($adObject.ObjectClass -eq "user") {
+                $results += New-Object -TypeName psobject -Property @{
+                    User = (Get-ADUser -Identity $adObject.DistinguishedName -Server $memberDomain)
+                    DirectGroup = $group
+                }
+            } elseif ($adObject.ObjectClass -eq "msDS-GroupManagedServiceAccount") {
+                $results += New-Object -TypeName psobject -Property @{
+                    User = (Get-ADServiceAccount -Identity $adObject.DistinguishedName -Server $memberDomain)
+                    DirectGroup = $group
+                }
+            } elseif ($adObject.ObjectClass -eq "computer") {
+                $results += New-Object -TypeName psobject -Property @{
+                    User = (Get-ADComputer -Identity $adObject.DistinguishedName -Server $memberDomain)
+                    DirectGroup = $group
+                }
+            }
+
+        }
+
+        return $results
 
     }
 }
