@@ -1,3 +1,66 @@
+function Get-OrganizationalUnitPermission {
+    <#
+    .SYNOPSIS
+        Get ACL permissions of Organizational Units
+    .DESCRIPTION
+        Returns custom objects showing ACL data from specified OUs.  Accepts array of OUs, and wildcards on Principals.
+        If no identity specified, outputs all ACLs on OU.
+    .PARAMETER Principals
+        Principal to filter by on ACL - Accepts wildcards, however format is domain\principal
+    .PARAMETER OrganizationalUnits
+        Array of OUs to check ACLs.  Supports cross-domain lookups.
+    .EXAMPLE
+        Get-OrganizationalUnitPermission -Principals "*Enterprise Admin*" -OrganizationalUnits "OU=Users,DC=Fabrikam,DC=COMs"
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string[]]$Principals,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$OrganizationalUnits
+    )
+    
+    If ($PSBoundParameters.ContainsKey("Principals")) {
+        $escapedPrincipals = $Principals | ForEach-Object { [Regex]::Escape($_) }
+        $regexReadyPrincipals = '^({0})$' -f ($escapedPrincipals -replace '\\\*', '.*' -join '|')
+    } else {
+        $regexReadyPrincipals = ""
+    }
+    
+    foreach ($organizationalUnit in $OrganizationalUnits) {
+        $domain = Split-DomainFromDistinguishedName -DistinguishedName $organizationalUnit
+        $domainController = Get-ADDomain -Server $domain | Select-Object -ExpandProperty PDCEmulator
+        
+        try { 
+            $returnedACLs = Invoke-Command -ComputerName $domainController -ErrorAction Stop -ScriptBlock {
+                Import-Module ActiveDirectory
+                (Get-Acl -Path "AD:\$($using:organizationalUnit)").access | Where-Object IdentityReference -Match $using:regexReadyPrincipals
+            }
+        } catch {
+            Write-Error $_.Exception.Message
+            Continue
+        }
+
+        foreach ($returnedACL in $returnedACLs) {
+
+            New-Object -TypeName psobject -Property @{
+                OrganizationalUnit = $organizationalUnit
+                ActiveDirectoryRights = $returnedACL.ActiveDirectoryRights
+                InheritanceType = $returnedACL.InheritanceType
+                ObjectType = $returnedACL.ObjectType
+                InheritedObjectType = $returnedACL.InheritedObjectType
+                ObjectFlags = $returnedACL.ObjectFlags
+                AccessControlType = $returnedACL.AccessControlType
+                IdentityReference = $returnedACL.IdentityReference
+                IsInherited = $returnedACL.IsInherited
+                InheritanceFlags = $returnedACL.InheritanceFlags
+                PropagationFlags = $returnedACL.PropagationFlags
+            }
+        }
+    }
+}
+
 function Get-RecursiveGroupMembers {
     <#
     .SYNOPSIS
